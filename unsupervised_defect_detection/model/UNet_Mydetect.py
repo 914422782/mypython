@@ -4,6 +4,50 @@ import torch.nn.functional as F
 from torch.nn import Transformer
 
 
+class WindowAttention(nn.Module):
+    def __init__(self, dim, window_size, num_heads):
+        super().__init__()
+        self.dim = dim
+        self.window_size = window_size
+        self.num_heads = num_heads
+        self.attention = nn.MultiheadAttention(dim, num_heads)
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+
+        # Ensure H and W are divisible by window_size
+        pad_h = (self.window_size - H % self.window_size) % self.window_size
+        pad_w = (self.window_size - W % self.window_size) % self.window_size
+        x = F.pad(x, (0, pad_w, 0, pad_h))
+
+        H_pad, W_pad = x.shape[2], x.shape[3]
+
+        x = x.view(B, C, H_pad // self.window_size, self.window_size, W_pad // self.window_size, self.window_size)
+        x = x.permute(0, 2, 4, 3, 5, 1).contiguous().view(-1, self.window_size * self.window_size, C)
+        attn_out, _ = self.attention(x, x, x)
+        attn_out = attn_out.view(B, H_pad // self.window_size, W_pad // self.window_size, self.window_size,
+                                 self.window_size, C)
+        attn_out = attn_out.permute(0, 5, 1, 3, 2, 4).contiguous().view(B, C, H_pad, W_pad)
+
+        # Remove padding
+        attn_out = attn_out[:, :, :H, :W]
+        return attn_out
+
+
+class TransformerWithWindow(nn.Module):
+    def __init__(self, d_model, window_size, nhead, num_encoder_layers):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            WindowAttention(d_model, window_size, nhead)
+            for _ in range(num_encoder_layers)
+        ])
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
 class UNet_Mydetect(nn.Module):
     def __init__(self, input=1, output=1):
         super(UNet_Mydetect, self).__init__()
@@ -35,7 +79,7 @@ class UNet_Mydetect(nn.Module):
         self.conv4_2_bn = nn.BatchNorm2d(512, momentum=batchNorm_momentum)
 
         # Transformer
-        self.transformer = Transformer(d_model=512, nhead=8, num_encoder_layers=6, batch_first=True)
+        self.transformer = TransformerWithWindow(d_model=512, window_size=4, nhead=8, num_encoder_layers=6)
 
         self.conv5_1 = nn.Conv2d(1024, 256, kernel_size=3, stride=1, padding=1)
         self.conv5_1_bn = nn.BatchNorm2d(256, momentum=batchNorm_momentum)
@@ -80,10 +124,11 @@ class UNet_Mydetect(nn.Module):
         e4 = F.relu(self.conv4_2_bn(self.conv4_2(e4_)))
 
         # Transformer module
-        b, c, h, w = e4.shape
-        e4_flat = e4.view(b, c, -1).permute(2, 0, 1)  # [H*W, B, C]
-        transformer_out = self.transformer(e4_flat, e4_flat)  # [H*W, B, C]
-        e4_transformed = transformer_out.permute(1, 2, 0).view(b, c, h, w)
+        # b, c, h, w = e4.shape
+        # e4_flat = e4.view(b, c, -1).permute(2, 0, 1)  # [H*W, B, C]
+        # transformer_out = self.transformer(e4_flat, e4_flat)  # [H*W, B, C]
+        # e4_transformed = transformer_out.permute(1, 2, 0).view(b, c, h, w)
+        e4_transformed = self.transformer(e4)
 
         d1_1 = F.interpolate(e4_transformed, scale_factor=2, mode='bilinear', align_corners=True)
         diffY = e3.size()[2] - d1_1.size()[2]
