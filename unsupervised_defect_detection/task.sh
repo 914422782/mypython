@@ -1,0 +1,1 @@
+python train_resconstruct_net.py --model 'UNet' --loss 'SSIM' --max_epochs 10 --var 0.15 --batch_size 20 --gpus 0 --lr 0.001 --flag 1

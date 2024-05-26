@@ -1,0 +1,2 @@
+#!/bin/bash
+python evaluate_gpu.py --pretrain ./log/syringe/Finish_UNet_Train_0Seed_SSIM_0.001lr_20Batch_0.15Var_1Flag_10Epoch/best_model.pth --result_dir ./log/syringe/Finish_UNet_Train_0Seed_SSIM_0.001lr_20Batch_0.15Var_1Flag_10Epoch/
